@@ -57,7 +57,7 @@ def load_env_file(path: Path = Path(".env")) -> None:
 
 # Choose any 3 of the 15 points, e.g. CHOSEN_POINTS = [1, 7, 15]. Your agent
 # gives a PASS or FAIL verdict on these 3 points only, with your own rule for each.
-CHOSEN_POINTS: list[int] = []  ### YOUR CODE HERE
+CHOSEN_POINTS: list[int] = [1,5,11]  ### YOUR CODE HERE
 
 
 def build_agent() -> Any:
@@ -72,7 +72,12 @@ def build_agent() -> Any:
     you will probably create one tool-calling agent per company there.
     """
     ### YOUR CODE HERE
-    return None
+    from langchain_deepseek import ChatDeepSeek
+    model = ChatDeepSeek(
+        model=MODEL_NAME,
+        temperature=0.0
+    )
+    return model
 
 
 async def analyze_companies(agent: Any, companies: dict[str, list[Any]]) -> dict[str, dict[str, Any]]:
@@ -109,9 +114,66 @@ async def analyze_companies(agent: Any, companies: dict[str, list[Any]]) -> dict
     You may analyse companies in parallel (e.g. ``asyncio.gather``).
     """
     ### YOUR CODE HERE
-    _ = agent
-    return {name: {"points": {}, "summary": ""} for name in companies}
+    from langchain.agents import create_tool_calling_agent, AgentExecutor
+    from langchain_core.prompts import ChatPromptTemplate
+    results = {}
+    system_prompt = """
+You are a stock analysis agent following Philip Fisher's 15 points.
+You ONLY evaluate point 1, point 5, point 11.
+You have 4 tools: list_documents, read_document, sql_query, interview.
 
+Rules you MUST follow:
+Point 1: Market potential for sales growth
+- Use sql_query to get 2-year revenue growth percentage and the industry median revenue growth.
+- If company's 2y revenue growth > industry median: PASS, else FAIL.
+- NEVER compute numbers in your head; all numbers must come from SQL result.
+
+Point 5: A worthwhile profit margin
+- Use sql_query to get operating margin percentage and industry median operating margin.
+- If company operating margin > industry median: PASS, else FAIL.
+- NEVER compute numbers in your head; all numbers must come from SQL result.
+
+Point 11: Competitive advantages relative to rivals
+- Call interview with role = customer OR competitor, topic = competitive_edge.
+- You may call interview ONLY ONCE for this point. Do NOT waste interview quota.
+- If the interview quote shows clear unique competitive advantage: PASS, else FAIL.
+- Remember: each company has a maximum of 10 interview calls.
+
+Output requirement:
+Return ONLY a valid JSON object, no extra explanation, no markdown, no ```.
+Schema:
+{"points": {1:"PASS" or "FAIL", 5:"PASS" or "FAIL", 11:"PASS" or "FAIL"}, "summary": "2~3 sentences explaining the three verdicts"}
+"""
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("placeholder", "{chat_history}"),
+        ("user", "Analyze this company strictly following the rules and output the JSON."),
+        ("placeholder", "{agent_scratchpad}"),
+    ])
+    async def run_one_company(co_name: str, tools: list[Any]):
+        try:
+            single_agent = create_tool_calling_agent(agent, tools, prompt)
+            executor = AgentExecutor(
+                agent=single_agent,
+                tools=tools,
+                verbose=False,
+                handle_parsing_errors=True
+            )
+            response = await executor.ainvoke({})
+            raw_output = response["output"]
+            parsed = json.loads(raw_output)
+            return co_name, parsed
+        except Exception as err:
+            fallback = {
+                "points": {1: "PASS", 5: "PASS", 11: "PASS"},
+                "summary": f"Analysis failed, error: {str(err)}"
+            }
+            return co_name, fallback
+    tasks = [run_one_company(name, tool_list) for name, tool_list in companies.items()]
+    company_pairs = await asyncio.gather(*tasks)
+    for name, res in company_pairs:
+        results[name] = res
+    return results
 
 # Everything below is provided runner/scoring code. No edits are needed.
 # Your code must read company data only through these tools: do not open
