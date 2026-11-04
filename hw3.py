@@ -114,7 +114,7 @@ async def analyze_companies(agent: Any, companies: dict[str, list[Any]]) -> dict
     You may analyse companies in parallel (e.g. ``asyncio.gather``).
     """
     ### YOUR CODE HERE
-    from langchain.agents import create_tool_calling_agent, AgentExecutor
+    from langchain_classic.agents import create_tool_calling_agent, AgentExecutor
     from langchain_core.prompts import ChatPromptTemplate
     results = {}
     system_prompt = """
