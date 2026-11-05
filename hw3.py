@@ -151,7 +151,7 @@ Point 11: Competitive advantages relative to rivals
 Output requirement:
 Return ONLY a valid JSON object, no extra explanation, no markdown, no ```.
 Schema:
-{{"points": {{1:"PASS" or "FAIL", 5:"PASS" or "FAIL", 11:"PASS" or "FAIL"}}, "summary": "2~3 sentences explaining the three verdicts based on the SQL numbers and interview quotes."}}
+{{"points": {{"1":"PASS" or "FAIL", "5":"PASS" or "FAIL", "11":"PASS" or "FAIL"}}, "summary": "2~3 sentences explaining the three verdicts based on the SQL numbers and interview quotes."}}
 """
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
