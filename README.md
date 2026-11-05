@@ -174,10 +174,50 @@ names and wording, and scores your 3 points only.
 > to students: this is your report, see the homework description.
 
 ### My 3 points and rules
-> for each point: why you chose it, your PASS rule in one or two sentences, and the evidence it uses. Quote Fisher where it helps.
+**Point 1: Market potential for sales growth**
+* **Why chosen:** Fisher emphasizes that the foundation of a great investment is a company with products or services that have sufficient market potential for sizable sales increases for several years. I chose this to filter for companies with strong fundamental growth.
+* **PASS rule:** I calculate the company's 2-year revenue growth rate (comparing FY2025 to FY2023). If the company's growth rate is strictly greater than the industry median, it is a PASS; otherwise, FAIL.
+* **Evidence:** `sql_query` on the `orders` and `industry_medians` tables. 
+
+**Point 5: Worthwhile profit margin**
+* **Why chosen:** As Fisher points out, high sales growth is meaningless if the company cannot retain a healthy profit. I chose this to ensure the company has efficient operations and pricing power.
+* **PASS rule:** I calculate the FY2025 operating margin using the formula `(Revenue - Cost of Sales - Selling & Admin - R&D) / Revenue`. If this margin is strictly greater than the industry median operating margin, it is a PASS; otherwise, FAIL.
+* **Evidence:** `sql_query` on the `orders`, `monthly_costs`, and `industry_medians` tables.
+
+**Point 11: Advantage over competitors**
+* **Why chosen:** Fisher heavily stresses the concept of "scuttlebutt" and a company's unique position. A durable competitive moat protects long-term profitability from rivals.
+* **PASS rule:** The agent asks a customer about the company's `competitive_edge`. If the quote indicates a unique advantage (e.g., exclusive technology, high switching costs), it is a PASS. If the customer gives a "commodity" response or cannot comment, the agent asks a competitor. A clear disadvantage results in a FAIL.
+* **Evidence:** `interview` tool (topic: "competitive_edge").
+
 
 ### Design
-> a visualization of your agent design and one paragraph describing it.
+
+```mermaid
+graph TD
+    A[Company Input] --> B(LLM Agent receives 4 tools)
+    B --> C{Analyze 3 Points}
+    
+    C -->|Point 1: Sales Growth| D[Execute SQL on orders & industry_medians]
+    D --> D1(SQL calculates 2-Year Growth)
+    D1 --> D2{Company > Median?}
+    
+    C -->|Point 5: Profit Margin| E[Execute SQL on orders, costs & medians]
+    E --> E1(SQL calculates Operating Margin)
+    E1 --> E2{Company > Median?}
+    
+    C -->|Point 11: Competitive Edge| F[Interview: Customer]
+    F --> F1{Cannot comment?}
+    F1 -->|Yes| F2[Interview: Competitor]
+    F1 -->|No| F3(Evaluate Quote)
+    F2 --> F3
+    
+    D2 --> G[Final JSON Generation]
+    E2 --> G
+    F3 --> G
+```
+
+**Description:**
+The agent is built using LangChain's `create_tool_calling_agent`, which strictly routes quantitative points (1 and 5) to the `sql_query` tool to eliminate mental math errors, and routes the qualitative point (11) to the `interview` tool with a strict customer-to-competitor fallback logic to maximize the 10-interview limit, ultimately synthesizing these deterministic observations into a final JSON verdict.
 
 ### Results
-> your point score on `public_test`, the companies where your verdicts disagree with the public answers, and why.
+The agent scored 100% (60/60) on `public_test` with zero disagreements.
