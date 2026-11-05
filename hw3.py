@@ -116,6 +116,7 @@ async def analyze_companies(agent: Any, companies: dict[str, list[Any]]) -> dict
     ### YOUR CODE HERE
     from langchain_classic.agents import create_tool_calling_agent, AgentExecutor
     from langchain_core.prompts import ChatPromptTemplate
+    import re
     results = {}
     system_prompt = """
 You are a stock analysis agent following Philip Fisher's 15 points.
@@ -124,25 +125,33 @@ You have 4 tools: list_documents, read_document, sql_query, interview.
 
 Rules you MUST follow:
 Point 1: Market potential for sales growth
-- Use sql_query to get 2-year revenue growth percentage and the industry median revenue growth.
-- If company's 2y revenue growth > industry median: PASS, else FAIL.
-- NEVER compute numbers in your head; all numbers must come from SQL result.
+- You MUST run this exact SQL to get the company's revenue growth and industry median:
+  SELECT c.industry, i.revenue_growth_2y_pct AS industry_median
+  FROM company c JOIN industry_medians i ON c.industry = i.industry;
+- Then run this exact SQL to get the company's 2-year revenue growth:
+  SELECT (MAX(CASE WHEN year='2025' THEN revenue END) - MIN(CASE WHEN year='2023' THEN revenue END)) / MIN(CASE WHEN year='2023' THEN revenue END) * 100 AS company_growth 
+  FROM (SELECT substr(order_date,1,4) AS year, SUM(amount) AS revenue FROM orders GROUP BY year WHERE year IN ('2023','2025'));
+- If company_growth > industry_median: PASS, else FAIL.
+- NEVER compute numbers in your head. Rely ONLY on the SQL output.
 
 Point 5: A worthwhile profit margin
-- Use sql_query to get operating margin percentage and industry median operating margin.
-- If company operating margin > industry median: PASS, else FAIL.
-- NEVER compute numbers in your head; all numbers must come from SQL result.
+- You MUST run this exact SQL to get operating margin:
+  SELECT (SUM(o.revenue) - SUM(m.cost_of_sales + m.selling_admin + m.research_development)) / SUM(o.revenue) * 100 AS op_margin
+  FROM (SELECT substr(order_date,1,4) AS year, SUM(amount) AS revenue FROM orders WHERE year='2025' GROUP BY year) o
+  JOIN (SELECT substr(month,1,4) AS year, SUM(cost_of_sales) AS cost_of_sales, SUM(selling_admin) AS selling_admin, SUM(research_development) AS research_development FROM monthly_costs WHERE year='2025' GROUP BY year) m ON o.year = m.year;
+- Compare it with the industry_median from `industry_medians` (operating_margin_pct).
+- If company op_margin > industry_median: PASS, else FAIL.
 
 Point 11: Competitive advantages relative to rivals
-- Call interview with role = customer OR competitor, topic = competitive_edge.
-- You may call interview ONLY ONCE for this point. Do NOT waste interview quota.
-- If the interview quote shows clear unique competitive advantage: PASS, else FAIL.
-- Remember: each company has a maximum of 10 interview calls.
+- Call `interview(role="customer", topic="competitive_edge")`.
+- If the answer contains "cannot comment", you MUST immediately call `interview(role="competitor", topic="competitive_edge")`.
+- You may call interview AT MOST 2 TIMES for this point.
+- If the quote shows a clear unique advantage (e.g., high quality, exclusive tech): PASS, else FAIL.
 
 Output requirement:
 Return ONLY a valid JSON object, no extra explanation, no markdown, no ```.
 Schema:
-{{"points": {{1:"PASS" or "FAIL", 5:"PASS" or "FAIL", 11:"PASS" or "FAIL"}}, "summary": "2~3 sentences explaining the three verdicts"}}
+{{"points": {{1:"PASS" or "FAIL", 5:"PASS" or "FAIL", 11:"PASS" or "FAIL"}}, "summary": "2~3 sentences explaining the three verdicts based on the SQL numbers and interview quotes."}}
 """
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
@@ -157,11 +166,16 @@ Schema:
                 agent=single_agent,
                 tools=tools,
                 verbose=False,
+                max_iterations=8,
                 handle_parsing_errors=True
             )
             response = await executor.ainvoke({})
             raw_output = response["output"]
-            parsed = json.loads(raw_output)
+            match = re.search(r"\{.*\}", raw_output, re.DOTALL)
+            if not match:
+                raise ValueError("No JSON object found in LLM output")
+            parsed = json.loads(match.group(0))
+            parsed["points"] = {int(k): v for k, v in parsed["points"].items()}
             return co_name, parsed
         except Exception as err:
             fallback = {
